@@ -21,6 +21,17 @@
  */
 package org.jboss.meryon.main;
 
+import org.w3c.dom.Document;
+import org.xml.sax.SAXException;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathExpression;
+import javax.xml.xpath.XPathExpressionException;
+import javax.xml.xpath.XPathFactory;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitOption;
@@ -197,6 +208,22 @@ public class Main {
         return true;
     }
 
+    private static boolean isPrivateModule(final Path dir) {
+        try {
+            final File moduleMetaData = dir.resolve("module.xml").toFile();
+            if (!moduleMetaData.exists())
+                return false;
+            final String jbossAPI = xpath(moduleMetaData, "/module/properties/property[@name='jboss.api']/@value");
+            return jbossAPI.equals("private");
+        } catch (SAXException e) {
+            throw new RuntimeException(e);
+        } catch (XPathExpressionException e) {
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private static <T> Iterable<T> iterate(final Enumeration<T> e) {
         return new Iterable<T>() {
             @Override
@@ -226,10 +253,12 @@ public class Main {
         final Path start = FileSystems.getDefault().getPath(path, "modules/system/layers/base");
         Files.walkFileTree(start, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE,
                 new SimpleFileVisitor<Path>() {
-//                        @Override
-//                        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-//                            throw new RuntimeException("NYI: .preVisitDirectory");
-//                        }
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                        if (isPrivateModule(dir))
+                            return FileVisitResult.SKIP_SUBTREE;
+                        return super.preVisitDirectory(dir, attrs);
+                    }
 
                     @Override
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
@@ -274,4 +303,17 @@ public class Main {
         return modules;
     }
 
+    private static String xpath(final File file, final String expression) throws IOException, SAXException, XPathExpressionException {
+        try {
+            final DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            final DocumentBuilder builder = factory.newDocumentBuilder();
+            final Document doc = builder.parse(file);
+            final XPathFactory xPathfactory = XPathFactory.newInstance();
+            final XPath xpath = xPathfactory.newXPath();
+            final XPathExpression expr = xpath.compile(expression);
+            return expr.evaluate(doc);
+        } catch (ParserConfigurationException e) {
+            throw new RuntimeException(e);
+        }
+    }
 }
