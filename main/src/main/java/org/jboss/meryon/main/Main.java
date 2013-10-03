@@ -126,9 +126,19 @@ public class Main {
     }
 
     public static void main(final String[] args) {
+        int p = 0;
+        String[] paths = new String[2];
+        boolean ignorePrivateModules = false;
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].equals("-i") || args[i].equals("--ignore-private-modules")) {
+                ignorePrivateModules = true;
+                continue;
+            }
+            paths[p++] = args[i];
+        }
         try {
-            final SortedMap<String, Module> install1 = scanModules(args[0]);
-            final SortedMap<String, Module> install2 = scanModules(args[1]);
+            final SortedMap<String, Module> install1 = scanModules(paths[0], ignorePrivateModules);
+            final SortedMap<String, Module> install2 = scanModules(paths[1], ignorePrivateModules);
 
             final StringBuilder report = diff(install1, install2, new Reporter<Module>() {
                 @Override
@@ -248,14 +258,14 @@ public class Main {
         };
     }
 
-    private static SortedMap<String, Module> scanModules(final String path) throws IOException {
+    private static SortedMap<String, Module> scanModules(final String path, final boolean ignorePrivateModules) throws IOException {
         final SortedMap<String, Module> modules = new TreeMap<>();
         final Path start = FileSystems.getDefault().getPath(path, "modules/system/layers/base");
         Files.walkFileTree(start, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE,
                 new SimpleFileVisitor<Path>() {
                     @Override
                     public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                        if (isPrivateModule(dir))
+                        if (ignorePrivateModules && isPrivateModule(dir))
                             return FileVisitResult.SKIP_SUBTREE;
                         return super.preVisitDirectory(dir, attrs);
                     }
