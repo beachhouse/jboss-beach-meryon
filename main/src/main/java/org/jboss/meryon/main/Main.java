@@ -21,6 +21,17 @@
  */
 package org.jboss.meryon.main;
 
+import org.w3c.dom.Document;
+import org.xml.sax.SAXException;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathExpression;
+import javax.xml.xpath.XPathExpressionException;
+import javax.xml.xpath.XPathFactory;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitOption;
@@ -115,9 +126,19 @@ public class Main {
     }
 
     public static void main(final String[] args) {
+        int p = 0;
+        String[] paths = new String[2];
+        boolean ignorePrivateModules = false;
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].equals("-i") || args[i].equals("--ignore-private-modules")) {
+                ignorePrivateModules = true;
+                continue;
+            }
+            paths[p++] = args[i];
+        }
         try {
-            final SortedMap<String, Module> install1 = scanModules(args[0]);
-            final SortedMap<String, Module> install2 = scanModules(args[1]);
+            final SortedMap<String, Module> install1 = scanModules(paths[0], ignorePrivateModules);
+            final SortedMap<String, Module> install2 = scanModules(paths[1], ignorePrivateModules);
 
             final StringBuilder report = diff(install1, install2, new Reporter<Module>() {
                 @Override
@@ -197,6 +218,22 @@ public class Main {
         return true;
     }
 
+    private static boolean isPrivateModule(final Path dir) {
+        try {
+            final File moduleMetaData = dir.resolve("module.xml").toFile();
+            if (!moduleMetaData.exists())
+                return false;
+            final String jbossAPI = xpath(moduleMetaData, "/module/properties/property[@name='jboss.api']/@value");
+            return jbossAPI.equals("private");
+        } catch (SAXException e) {
+            throw new RuntimeException(e);
+        } catch (XPathExpressionException e) {
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private static <T> Iterable<T> iterate(final Enumeration<T> e) {
         return new Iterable<T>() {
             @Override
@@ -221,15 +258,17 @@ public class Main {
         };
     }
 
-    private static SortedMap<String, Module> scanModules(final String path) throws IOException {
+    private static SortedMap<String, Module> scanModules(final String path, final boolean ignorePrivateModules) throws IOException {
         final SortedMap<String, Module> modules = new TreeMap<>();
         final Path start = FileSystems.getDefault().getPath(path, "modules/system/layers/base");
         Files.walkFileTree(start, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE,
                 new SimpleFileVisitor<Path>() {
-//                        @Override
-//                        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-//                            throw new RuntimeException("NYI: .preVisitDirectory");
-//                        }
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                        if (ignorePrivateModules && isPrivateModule(dir))
+                            return FileVisitResult.SKIP_SUBTREE;
+                        return super.preVisitDirectory(dir, attrs);
+                    }
 
                     @Override
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
@@ -274,4 +313,17 @@ public class Main {
         return modules;
     }
 
+    private static String xpath(final File file, final String expression) throws IOException, SAXException, XPathExpressionException {
+        try {
+            final DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            final DocumentBuilder builder = factory.newDocumentBuilder();
+            final Document doc = builder.parse(file);
+            final XPathFactory xPathfactory = XPathFactory.newInstance();
+            final XPath xpath = xPathfactory.newXPath();
+            final XPathExpression expr = xpath.compile(expression);
+            return expr.evaluate(doc);
+        } catch (ParserConfigurationException e) {
+            throw new RuntimeException(e);
+        }
+    }
 }
